@@ -86,20 +86,22 @@ type Model struct {
 	pickerTarget    int
 	editingIndex    int
 	editingValue    string
+	startupAligned  bool
 }
 
 func NewModel(cfg config.Config, configPath string, now func() time.Time) *Model {
 	return &Model{
-		cfg:           cfg,
-		configPath:    configPath,
-		now:           now,
-		width:         100,
-		height:        20,
-		hiddenMembers: make(map[string]bool),
-		hiddenZones:   make(map[string]bool),
-		pickerOffset:  0,
-		pickerTarget:  -1,
-		editingIndex:  -1,
+		cfg:            cfg,
+		configPath:     configPath,
+		now:            now,
+		width:          100,
+		height:         20,
+		hiddenMembers:  make(map[string]bool),
+		hiddenZones:    make(map[string]bool),
+		pickerOffset:   0,
+		pickerTarget:   -1,
+		editingIndex:   -1,
+		startupAligned: false,
 		styles: styles{
 			name:             lipgloss.NewStyle().Foreground(lipgloss.Color("110")).Bold(true),
 			available:        lipgloss.NewStyle().Foreground(lipgloss.Color("108")),
@@ -212,6 +214,11 @@ func (m *Model) View() string {
 	referenceLocation, err := time.LoadLocation(m.cfg.ReferenceTimezone)
 	if err != nil {
 		return m.renderMessage(fmt.Sprintf("Failed to load reference timezone: %v", err), "q to quit")
+	}
+
+	if !m.startupAligned {
+		m.timeOffset = m.defaultStartupOffset(fullWindow.Start, fullWindow.Hours, visibleHours, referenceLocation)
+		m.startupAligned = true
 	}
 
 	m.clampTimeOffset(fullWindow.Hours, visibleHours)
@@ -937,6 +944,24 @@ func (m *Model) clampTimeOffset(totalHours, visibleHours int) {
 	if m.timeOffset > maxOffset {
 		m.timeOffset = maxOffset
 	}
+}
+
+func (m *Model) defaultStartupOffset(start time.Time, totalHours, visibleHours int, referenceLocation *time.Location) int {
+	current := start.In(referenceLocation)
+	target := time.Date(current.Year(), current.Month(), current.Day(), 7, 0, 0, 0, referenceLocation)
+	if target.Before(current) {
+		target = target.Add(24 * time.Hour)
+	}
+
+	offset := int(target.Sub(current).Hours())
+	maxOffset := max(0, totalHours-visibleHours)
+	if offset < 0 {
+		return 0
+	}
+	if offset > maxOffset {
+		return maxOffset
+	}
+	return offset
 }
 
 func (m *Model) nameColumnWidth() int {

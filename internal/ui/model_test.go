@@ -182,6 +182,25 @@ func TestSliceWindowShiftsVisibleRange(t *testing.T) {
 	}
 }
 
+func TestDefaultStartupOffsetAlignsTo7AM(t *testing.T) {
+	model := NewModel(config.Config{}, "", time.Now)
+	location, err := time.LoadLocation("UTC")
+	if err != nil {
+		t.Fatalf("LoadLocation() error = %v", err)
+	}
+
+	offset := model.defaultStartupOffset(
+		time.Date(2024, 6, 3, 18, 0, 0, 0, time.UTC),
+		48,
+		24,
+		location,
+	)
+
+	if offset != 13 {
+		t.Fatalf("defaultStartupOffset() = %d, want 13", offset)
+	}
+}
+
 func TestViewWarnsWhenHeightCannotFitVisibleMembers(t *testing.T) {
 	cfg := config.Config{
 		ReferenceTimezone: "UTC",
@@ -325,6 +344,8 @@ func TestHandleClickTogglesOnlyTargetCell(t *testing.T) {
 	})
 	model.width = 120
 	model.height = 20
+	model.startupAligned = true
+	model.timeOffset = 0
 
 	_ = model.View()
 
@@ -368,6 +389,8 @@ func TestHandleClickTogglesOnlySelectedCellForHalfHourOffset(t *testing.T) {
 	})
 	model.width = 120
 	model.height = 20
+	model.startupAligned = true
+	model.timeOffset = 0
 
 	_ = model.View()
 
