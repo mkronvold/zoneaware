@@ -9,7 +9,7 @@ cp examples/zoneaware.yaml ~/.config/zoneaware.yaml
 ./run.sh
 ```
 
-Use `./run.sh -config /path/to/zoneaware.yaml` to point at a different config file. `run.sh` launches the TUI from the repository root and passes flags through to the Go app.
+Use `./run.sh -config /path/to/zoneaware.yaml` to point at a different config file. `run.sh` builds a local binary under `.bin/` when needed, then launches the TUI from the repository root.
 
 ## Controls
 

@@ -3,4 +3,5 @@
 *.out
 *.test
 coverage.out
+.bin/
 za
