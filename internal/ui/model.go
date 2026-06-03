@@ -82,6 +82,7 @@ type Model struct {
 	pickerOpen      bool
 	pickerFilter    string
 	pickerSelection int
+	pickerOffset    int
 	pickerTarget    int
 	editingIndex    int
 	editingValue    string
@@ -96,6 +97,7 @@ func NewModel(cfg config.Config, configPath string, now func() time.Time) *Model
 		height:        20,
 		hiddenMembers: make(map[string]bool),
 		hiddenZones:   make(map[string]bool),
+		pickerOffset:  0,
 		pickerTarget:  -1,
 		editingIndex:  -1,
 		styles: styles{
@@ -164,11 +166,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		switch msg.Type {
 		case tea.MouseWheelUp:
-			if !m.pickerOpen {
+			if m.pickerOpen {
+				m.movePicker(-1)
+			} else {
 				m.scrollTime(-1)
 			}
 		case tea.MouseWheelDown:
-			if !m.pickerOpen {
+			if m.pickerOpen {
+				m.movePicker(1)
+			} else {
 				m.scrollTime(1)
 			}
 		case tea.MouseLeft:
@@ -275,35 +281,36 @@ func (m *Model) updatePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pickerOpen = false
 		m.pickerFilter = ""
 		m.pickerSelection = 0
+		m.pickerOffset = 0
 		m.pickerTarget = -1
 		return m, nil
 	case "ctrl+l":
 		m.lastError = ""
 		return m, tea.ClearScreen
 	case "enter":
-		options := m.displayedTimezones()
+		options := m.filteredTimezones()
 		if len(options) == 0 {
 			return m, nil
+		}
+		if m.pickerSelection >= len(options) {
+			m.pickerSelection = len(options) - 1
 		}
 		if err := m.selectPickedTimezone(options[m.pickerSelection]); err != nil {
 			m.lastError = err.Error()
 		}
 		return m, tea.ClearScreen
 	case "up":
-		if m.pickerSelection > 0 {
-			m.pickerSelection--
-		}
+		m.movePicker(-1)
 		return m, nil
 	case "down":
-		if m.pickerSelection < len(m.displayedTimezones())-1 {
-			m.pickerSelection++
-		}
+		m.movePicker(1)
 		return m, nil
 	case "backspace", "ctrl+h":
 		if m.pickerFilter != "" {
 			runes := []rune(m.pickerFilter)
 			m.pickerFilter = string(runes[:len(runes)-1])
 			m.pickerSelection = 0
+			m.pickerOffset = 0
 		}
 		return m, nil
 	}
@@ -311,6 +318,7 @@ func (m *Model) updatePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if len(msg.Runes) > 0 {
 		m.pickerFilter += string(msg.Runes)
 		m.pickerSelection = 0
+		m.pickerOffset = 0
 	}
 
 	return m, nil
@@ -372,19 +380,21 @@ func (m *Model) renderReferencePicker(startY int) []string {
 	}
 	lines = append(lines, m.renderLine(m.styles.pickerInput.Render("Timezone filter: "+filter)))
 
-	options := m.displayedTimezones()
-	if len(options) == 0 {
+	filtered := m.filteredTimezones()
+	if len(filtered) == 0 {
 		lines = append(lines, m.renderLine(m.styles.muted.Render("No matching timezones")))
 		return lines
 	}
 
-	if m.pickerSelection >= len(options) {
-		m.pickerSelection = len(options) - 1
+	if m.pickerSelection >= len(filtered) {
+		m.pickerSelection = len(filtered) - 1
 	}
+	options := m.displayedTimezones()
 
 	for idx, zone := range options {
 		style := m.styles.pickerOption
-		if idx == m.pickerSelection {
+		absoluteIndex := m.pickerOffset + idx
+		if absoluteIndex == m.pickerSelection {
 			style = m.styles.pickerSelected
 		}
 		label := zone
@@ -447,36 +457,41 @@ func (m *Model) renderMemberRow(nameWidth, labelWidth int, row visibleMember, li
 		value: row.timeline.Name,
 		index: row.index,
 		x1:    0,
-		x2:    nameWidth,
+		x2:    lipgloss.Width(builder.String()),
 		y:     lineY,
 	})
 
-	cellsStartX := nameWidth + 1
 	for idx, cell := range row.timeline.Cells {
+		cellX1 := lipgloss.Width(builder.String())
+		separator := m.cellSeparator(row.timeline.Cells[0].Start, idx, len(row.timeline.Cells), referenceLocation)
+		cellText := "░░" + separator
+		if cell.Available {
+			cellText = "██" + separator
+		}
+
 		m.hotspots = append(m.hotspots, hotspot{
 			kind:      hotspotCell,
 			value:     row.timeline.Name,
 			index:     row.index,
 			slotStart: cell.Start,
-			x1:        cellsStartX + idx*cellWidth,
-			x2:        cellsStartX + (idx+1)*cellWidth,
+			x1:        cellX1,
+			x2:        cellX1 + lipgloss.Width(cellText),
 			y:         lineY,
 		})
 
-		separator := m.cellSeparator(row.timeline.Cells[0].Start, idx, len(row.timeline.Cells), referenceLocation)
 		if m.isCurrentHour(cell.Start) {
 			if cell.Available {
-				builder.WriteString(m.styles.currentAvailable.Render("██" + separator))
+				builder.WriteString(m.styles.currentAvailable.Render(cellText))
 			} else {
-				builder.WriteString(m.styles.currentOffHours.Render("░░" + separator))
+				builder.WriteString(m.styles.currentOffHours.Render(cellText))
 			}
 			continue
 		}
 
 		if cell.Available {
-			builder.WriteString(m.styles.available.Render("██" + separator))
+			builder.WriteString(m.styles.available.Render(cellText))
 		} else {
-			builder.WriteString(m.styles.offHours.Render("░░" + separator))
+			builder.WriteString(m.styles.offHours.Render(cellText))
 		}
 	}
 
@@ -623,6 +638,7 @@ func (m *Model) openTimezonePicker(targetMember int) error {
 	m.pickerOpen = true
 	m.pickerFilter = ""
 	m.pickerSelection = 0
+	m.pickerOffset = 0
 	m.pickerTarget = targetMember
 	m.lastError = ""
 	return nil
@@ -666,6 +682,7 @@ func (m *Model) selectReferenceTimezone(timezone string) error {
 	m.pickerOpen = false
 	m.pickerFilter = ""
 	m.pickerSelection = 0
+	m.pickerOffset = 0
 	m.pickerTarget = -1
 	m.lastError = ""
 	return nil
@@ -688,6 +705,7 @@ func (m *Model) selectMemberTimezone(index int, timezone string) error {
 	m.pickerOpen = false
 	m.pickerFilter = ""
 	m.pickerSelection = 0
+	m.pickerOffset = 0
 	m.pickerTarget = -1
 	m.lastError = ""
 	return nil
@@ -798,10 +816,20 @@ func (m *Model) filteredTimezones() []string {
 
 func (m *Model) displayedTimezones() []string {
 	options := m.filteredTimezones()
-	if len(options) > maxTimezoneOptions {
-		return options[:maxTimezoneOptions]
+	if len(options) <= maxTimezoneOptions {
+		return options
 	}
-	return options
+
+	maxOffset := len(options) - maxTimezoneOptions
+	if m.pickerOffset < 0 {
+		m.pickerOffset = 0
+	}
+	if m.pickerOffset > maxOffset {
+		m.pickerOffset = maxOffset
+	}
+
+	end := min(len(options), m.pickerOffset+maxTimezoneOptions)
+	return options[m.pickerOffset:end]
 }
 
 func (m *Model) referencePickerRows() int {
@@ -817,6 +845,30 @@ func (m *Model) referencePickerRows() int {
 		optionCount = maxTimezoneOptions
 	}
 	return 1 + optionCount
+}
+
+func (m *Model) movePicker(delta int) {
+	options := m.filteredTimezones()
+	if len(options) == 0 {
+		m.pickerSelection = 0
+		m.pickerOffset = 0
+		return
+	}
+
+	m.pickerSelection += delta
+	if m.pickerSelection < 0 {
+		m.pickerSelection = 0
+	}
+	if m.pickerSelection >= len(options) {
+		m.pickerSelection = len(options) - 1
+	}
+
+	if m.pickerSelection < m.pickerOffset {
+		m.pickerOffset = m.pickerSelection
+	}
+	if m.pickerSelection >= m.pickerOffset+maxTimezoneOptions {
+		m.pickerOffset = m.pickerSelection - maxTimezoneOptions + 1
+	}
 }
 
 func (m *Model) visibleZoneLabels(members []visibleMember) []zoneInfo {

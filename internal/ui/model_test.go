@@ -126,6 +126,32 @@ func TestDisplayedTimezonesUsesLiveFilter(t *testing.T) {
 	}
 }
 
+func TestDisplayedTimezonesScrollsWindow(t *testing.T) {
+	model := NewModel(config.Config{ReferenceTimezone: "UTC"}, "", time.Now)
+	model.timezoneOptions = []string{
+		"Africa/Abidjan",
+		"Africa/Accra",
+		"Africa/Addis_Ababa",
+		"Africa/Algiers",
+		"Africa/Asmara",
+		"Africa/Bamako",
+		"Africa/Bangui",
+	}
+	model.pickerOpen = true
+
+	for i := 0; i < 6; i++ {
+		model.movePicker(1)
+	}
+
+	options := model.displayedTimezones()
+	if len(options) != 6 {
+		t.Fatalf("len(displayedTimezones()) = %d, want 6", len(options))
+	}
+	if options[0] != "Africa/Accra" || options[5] != "Africa/Bangui" {
+		t.Fatalf("displayedTimezones() = %#v, want scrolled window", options)
+	}
+}
+
 func TestSliceWindowShiftsVisibleRange(t *testing.T) {
 	window := schedule.Window{
 		Start: time.Date(2024, 6, 3, 12, 0, 0, 0, time.UTC),
@@ -234,5 +260,48 @@ func TestSelectMemberTimezoneUpdatesConfig(t *testing.T) {
 
 	if model.cfg.Team[0].Timezone != "America/Denver" {
 		t.Fatalf("member timezone = %q, want America/Denver", model.cfg.Team[0].Timezone)
+	}
+}
+
+func TestHandleClickTogglesOnlyTargetCell(t *testing.T) {
+	model := NewModel(config.Config{
+		ReferenceTimezone: "UTC",
+		WindowHours:       48,
+		Team: []config.TeamMember{
+			{Name: "Alice", Timezone: "UTC"},
+		},
+	}, "", func() time.Time {
+		return time.Date(2024, 6, 3, 12, 0, 0, 0, time.UTC)
+	})
+	model.width = 120
+	model.height = 20
+
+	_ = model.View()
+
+	targetTime := time.Date(2024, 6, 3, 16, 0, 0, 0, time.UTC)
+	var target hotspot
+	found := false
+	for _, spot := range model.hotspots {
+		if spot.kind == hotspotCell && spot.index == 0 && spot.slotStart.Equal(targetTime) {
+			target = spot
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("did not find hotspot for %v", targetTime)
+	}
+
+	model.handleClick(target.x1, target.y)
+
+	slots, err := config.HourlySlots(model.cfg.Team[0].WorkingHours)
+	if err != nil {
+		t.Fatalf("HourlySlots() error = %v", err)
+	}
+	for hour, enabled := range slots {
+		want := hour == 16
+		if enabled != want {
+			t.Fatalf("slot %d = %t, want %t", hour, enabled, want)
+		}
 	}
 }
