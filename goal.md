@@ -1,0 +1,34 @@
+plan an application that visualizes the working hours of a team across time zones.
+- a standalone windows/linux dual os app
+- a standalone TUI WSL app with mouse controls to scroll, click
+- can be pulled up at a glance to answer questions about 24hr coverage
+- visually answer "who is available now|then"
+- one main pane, hours across the top, team members on the left
+- clicking on a team member hides them. 
+- clicking on the time zones hides them,
+- one show all button to reset all time zones and team members
+- a TUI with a more visual and less control oriented view.  see @tui.txt for reference
+- a colorized version is in @tui-color.txt
+- Visual hierarchy
+  - Names pop in frost blue
+  - Working hours glow in green
+  - Off-hours fade into the background
+  - Hidden items show in red
+  - "Show All" stands out in amber
+- Minimal chrome
+Just the grid, the names, the timeline, and a tiny footer.
+- hide interactions
+  - Click a name -> row disappears
+  - Click a timezone -> column alignment disappears
+  - "Show All" resets everything
+- Zellij friendly
+  - Box borders
+  - Clean ANSI colors
+  - Works in any terminal with mouse mode enabled
+- set the working  hours for each team member and their local TZ
+- adjusts for daylight savings in each time zone
+- toggle show/hide for each team member
+- toggle show/hide for each time zone ( ZoneAware (za)  ZoneAware (za) keeping team members displayed)
+- automatically show/hide the time zones displayed based on which team members are shown
+- automatically adjusts the range of time shown by the size of the window
+- store team member times and time zones in ~/.config/zoneaware.yaml (or other human editable format)
