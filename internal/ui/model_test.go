@@ -305,3 +305,51 @@ func TestHandleClickTogglesOnlyTargetCell(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleClickTogglesOnlySelectedCellForHalfHourOffset(t *testing.T) {
+	model := NewModel(config.Config{
+		ReferenceTimezone: "UTC",
+		WindowHours:       48,
+		Team: []config.TeamMember{
+			{Name: "Mahabelesh", Timezone: "Asia/Kolkata"},
+		},
+	}, "", func() time.Time {
+		return time.Date(2024, 6, 3, 0, 0, 0, 0, time.UTC)
+	})
+	model.width = 120
+	model.height = 20
+
+	_ = model.View()
+
+	var target hotspot
+	found := false
+	for _, spot := range model.hotspots {
+		if spot.kind == hotspotCell && spot.index == 0 && spot.slotStart.Equal(time.Date(2024, 6, 3, 1, 0, 0, 0, time.UTC)) {
+			target = spot
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("did not find second-column hotspot")
+	}
+
+	model.handleClick(target.x1, target.y)
+
+	window, err := schedule.Build(model.cfg, time.Date(2024, 6, 3, 0, 0, 0, 0, time.UTC), 4)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	got := []bool{
+		window.Members[0].Cells[0].Available,
+		window.Members[0].Cells[1].Available,
+		window.Members[0].Cells[2].Available,
+	}
+	want := []bool{false, true, false}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("cell %d = %t, want %t (got=%v)", i, got[i], want[i], got)
+		}
+	}
+}

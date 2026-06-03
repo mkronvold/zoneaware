@@ -81,3 +81,24 @@ func TestToggleMemberHourAddsAndRemovesSlots(t *testing.T) {
 		t.Fatalf("WorkingHours after add = %#v", cfg.Team[0].WorkingHours)
 	}
 }
+
+func TestToggleMemberHourUsesQuarterPrecisionForHalfHourOffsets(t *testing.T) {
+	member := TeamMember{
+		Name:     "Mahabelesh",
+		Timezone: "Asia/Kolkata",
+	}
+
+	slot := time.Date(2024, 6, 3, 0, 0, 0, 0, time.UTC)
+	if err := member.ToggleHour(slot); err != nil {
+		t.Fatalf("ToggleHour() error = %v", err)
+	}
+
+	if len(member.WorkingHours) != 1 {
+		t.Fatalf("len(WorkingHours) = %d, want 1", len(member.WorkingHours))
+	}
+
+	want := WorkingHours{Start: "05:30", End: "06:30"}
+	if member.WorkingHours[0] != want {
+		t.Fatalf("WorkingHours[0] = %#v, want %#v", member.WorkingHours[0], want)
+	}
+}

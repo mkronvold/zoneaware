@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+const quarterMinutes = 15
+
 func (cfg *Config) ToggleMemberHour(name string, slotStart time.Time) error {
 	for i := range cfg.Team {
 		if cfg.Team[i].Name == name {
@@ -22,20 +24,50 @@ func (member *TeamMember) ToggleHour(slotStart time.Time) error {
 		return fmt.Errorf("load timezone: %w", err)
 	}
 
-	slots, err := HourlySlots(member.WorkingHours)
+	slots, err := QuarterHourSlots(member.WorkingHours)
 	if err != nil {
 		return err
 	}
 
-	localHour := slotStart.In(location).Hour()
-	slots[localHour] = !slots[localHour]
-	member.WorkingHours = WorkingHoursFromHourlySlots(slots)
+	quarterIndexes := localQuarterIndexes(slotStart, location)
+	allEnabled := true
+	for _, index := range quarterIndexes {
+		if !slots[index] {
+			allEnabled = false
+			break
+		}
+	}
+
+	for _, index := range quarterIndexes {
+		slots[index] = !allEnabled
+	}
+
+	member.WorkingHours = WorkingHoursFromQuarterSlots(slots)
 
 	return nil
 }
 
 func HourlySlots(ranges []WorkingHours) ([24]bool, error) {
+	quarterSlots, err := QuarterHourSlots(ranges)
+	if err != nil {
+		return [24]bool{}, err
+	}
+
 	var slots [24]bool
+	for hour := 0; hour < 24; hour++ {
+		for quarter := 0; quarter < 4; quarter++ {
+			if quarterSlots[hour*4+quarter] {
+				slots[hour] = true
+				break
+			}
+		}
+	}
+
+	return slots, nil
+}
+
+func QuarterHourSlots(ranges []WorkingHours) ([96]bool, error) {
+	var slots [96]bool
 
 	for _, workRange := range ranges {
 		start, err := ParseClock(workRange.Start)
@@ -55,12 +87,10 @@ func HourlySlots(ranges []WorkingHours) ([24]bool, error) {
 			end = 0
 		}
 
-		for hour := 0; hour < 24; hour++ {
-			for sample := 0; sample < 4; sample++ {
-				if containsMinute(start, end, hour*60+sample*15) {
-					slots[hour] = true
-					break
-				}
+		for quarter := 0; quarter < len(slots); quarter++ {
+			minuteOfDay := quarter * quarterMinutes
+			if containsMinute(start, end, minuteOfDay) {
+				slots[quarter] = true
 			}
 		}
 	}
@@ -69,35 +99,49 @@ func HourlySlots(ranges []WorkingHours) ([24]bool, error) {
 }
 
 func WorkingHoursFromHourlySlots(slots [24]bool) []WorkingHours {
+	var quarterSlots [96]bool
+	for hour, enabled := range slots {
+		if !enabled {
+			continue
+		}
+		for quarter := 0; quarter < 4; quarter++ {
+			quarterSlots[hour*4+quarter] = true
+		}
+	}
+
+	return WorkingHoursFromQuarterSlots(quarterSlots)
+}
+
+func WorkingHoursFromQuarterSlots(slots [96]bool) []WorkingHours {
 	if slices.Index(slots[:], true) == -1 {
 		return nil
 	}
 
-	if allHoursEnabled(slots) {
+	if allSlotsEnabled(slots[:]) {
 		return []WorkingHours{{Start: "00:00", End: "24:00"}}
 	}
 
 	ranges := make([]WorkingHours, 0)
-	for hour := 0; hour < 24; hour++ {
-		if !slots[hour] || slots[(hour+23)%24] {
+	for quarter := 0; quarter < len(slots); quarter++ {
+		if !slots[quarter] || slots[(quarter+len(slots)-1)%len(slots)] {
 			continue
 		}
 
-		end := (hour + 1) % 24
-		for end != hour && slots[end] {
-			end = (end + 1) % 24
+		end := (quarter + 1) % len(slots)
+		for end != quarter && slots[end] {
+			end = (end + 1) % len(slots)
 		}
 
 		ranges = append(ranges, WorkingHours{
-			Start: formatHour(hour),
-			End:   formatHour(end),
+			Start: formatMinute(quarter * quarterMinutes),
+			End:   formatMinute(end * quarterMinutes),
 		})
 	}
 
 	return ranges
 }
 
-func allHoursEnabled(slots [24]bool) bool {
+func allSlotsEnabled(slots []bool) bool {
 	for _, enabled := range slots {
 		if !enabled {
 			return false
@@ -111,10 +155,32 @@ func formatHour(hour int) string {
 	return fmt.Sprintf("%02d:00", hour)
 }
 
+func formatMinute(minute int) string {
+	hour := (minute / 60) % 24
+	minute = minute % 60
+	return fmt.Sprintf("%02d:%02d", hour, minute)
+}
+
 func containsMinute(start, end, minuteOfDay int) bool {
 	if start < end {
 		return minuteOfDay >= start && minuteOfDay < end
 	}
 
 	return minuteOfDay >= start || minuteOfDay < end
+}
+
+func localQuarterIndexes(slotStart time.Time, location *time.Location) []int {
+	indexes := make([]int, 0, 4)
+	seen := make(map[int]bool)
+	for sample := 0; sample < 4; sample++ {
+		local := slotStart.Add(time.Duration(sample) * 15 * time.Minute).In(location)
+		index := (local.Hour()*60 + local.Minute()) / quarterMinutes
+		if seen[index] {
+			continue
+		}
+		seen[index] = true
+		indexes = append(indexes, index)
+	}
+
+	return indexes
 }
