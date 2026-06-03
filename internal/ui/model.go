@@ -37,6 +37,7 @@ type hotspot struct {
 	kind      hotspotKind
 	value     string
 	index     int
+	half      int
 	slotStart time.Time
 	x1        int
 	x2        int
@@ -63,6 +64,9 @@ type styles struct {
 	pickerOption     lipgloss.Style
 	pickerSelected   lipgloss.Style
 	rowEditing       lipgloss.Style
+	availableHalf    lipgloss.Style
+	offHoursHalf     lipgloss.Style
+	currentHalf      lipgloss.Style
 }
 
 type Model struct {
@@ -120,6 +124,9 @@ func NewModel(cfg config.Config, configPath string, now func() time.Time) *Model
 			pickerOption:     lipgloss.NewStyle().Foreground(lipgloss.Color("252")),
 			pickerSelected:   lipgloss.NewStyle().Foreground(lipgloss.Color("222")).Bold(true),
 			rowEditing:       lipgloss.NewStyle().Background(lipgloss.Color("236")),
+			availableHalf:    lipgloss.NewStyle().Foreground(lipgloss.Color("108")),
+			offHoursHalf:     lipgloss.NewStyle().Foreground(lipgloss.Color("239")),
+			currentHalf:      lipgloss.NewStyle().Foreground(lipgloss.Color("217")).Bold(true),
 		},
 	}
 }
@@ -487,35 +494,31 @@ func (m *Model) renderMemberRow(nameWidth, labelWidth int, row visibleMember, li
 	for idx, cell := range row.timeline.Cells {
 		cellX1 := lipgloss.Width(builder.String())
 		separator := m.cellSeparator(row.timeline.Cells[0].Start, idx, len(row.timeline.Cells), referenceLocation)
-		cellText := "░░" + separator
-		if cell.Available {
-			cellText = "██" + separator
-		}
+		leftText := m.renderHalfCell(cell.Start, 0, cell.Halves[0])
+		rightText := m.renderHalfCell(cell.Start, 1, cell.Halves[1])
+		cellText := leftText + rightText + separator
 
 		m.hotspots = append(m.hotspots, hotspot{
 			kind:      hotspotCell,
 			value:     row.timeline.Name,
 			index:     row.index,
+			half:      0,
 			slotStart: cell.Start,
 			x1:        cellX1,
-			x2:        cellX1 + lipgloss.Width(cellText),
+			x2:        cellX1 + lipgloss.Width(leftText),
 			y:         lineY,
 		})
-
-		if m.isCurrentHour(cell.Start) {
-			if cell.Available {
-				builder.WriteString(m.styles.currentAvailable.Render(cellText))
-			} else {
-				builder.WriteString(m.styles.currentOffHours.Render(cellText))
-			}
-			continue
-		}
-
-		if cell.Available {
-			builder.WriteString(m.styles.available.Render(cellText))
-		} else {
-			builder.WriteString(m.styles.offHours.Render(cellText))
-		}
+		m.hotspots = append(m.hotspots, hotspot{
+			kind:      hotspotCell,
+			value:     row.timeline.Name,
+			index:     row.index,
+			half:      1,
+			slotStart: cell.Start,
+			x1:        cellX1 + lipgloss.Width(leftText),
+			x2:        cellX1 + lipgloss.Width(leftText) + lipgloss.Width(rightText),
+			y:         lineY,
+		})
+		builder.WriteString(cellText)
 	}
 
 	rightLabel := ""
@@ -617,7 +620,7 @@ func (m *Model) handleClick(x, y int) {
 			if m.editingIndex >= 0 {
 				return
 			}
-			if err := m.toggleMemberHour(spot.index, spot.slotStart); err != nil {
+			if err := m.toggleMemberHalfHour(spot.index, spot.slotStart, spot.half); err != nil {
 				m.lastError = err.Error()
 			} else {
 				m.lastError = ""
@@ -1155,6 +1158,11 @@ func (m *Model) isCurrentHour(slotStart time.Time) bool {
 	return !m.renderNow.Before(slotStart) && m.renderNow.Before(slotStart.Add(time.Hour))
 }
 
+func (m *Model) isCurrentHalf(slotStart time.Time, halfIndex int) bool {
+	halfStart := slotStart.Add(time.Duration(halfIndex) * 30 * time.Minute)
+	return !m.renderNow.Before(halfStart) && m.renderNow.Before(halfStart.Add(30*time.Minute))
+}
+
 func (m *Model) sortZonesByCurrentTime(zones []zoneInfo) {
 	sort.Slice(zones, func(i, j int) bool {
 		left := localClockMinutes(zones[i].id, m.renderNow)
@@ -1176,13 +1184,13 @@ func localClockMinutes(timezone string, now time.Time) int {
 	return local.Hour()*60 + local.Minute()
 }
 
-func (m *Model) toggleMemberHour(memberIndex int, slotStart time.Time) error {
+func (m *Model) toggleMemberHalfHour(memberIndex int, slotStart time.Time, halfIndex int) error {
 	if memberIndex < 0 || memberIndex >= len(m.cfg.Team) {
 		return fmt.Errorf("team member index %d is out of range", memberIndex)
 	}
 
 	original := cloneConfig(m.cfg)
-	if err := m.cfg.Team[memberIndex].ToggleHour(slotStart); err != nil {
+	if err := m.cfg.Team[memberIndex].ToggleHalfHour(slotStart, halfIndex); err != nil {
 		return err
 	}
 
@@ -1196,6 +1204,19 @@ func (m *Model) toggleMemberHour(memberIndex int, slotStart time.Time) error {
 	}
 
 	return nil
+}
+
+func (m *Model) renderHalfCell(slotStart time.Time, halfIndex int, available bool) string {
+	char := "░"
+	style := m.styles.offHoursHalf
+	if available {
+		char = "█"
+		style = m.styles.availableHalf
+	}
+	if m.isCurrentHalf(slotStart, halfIndex) {
+		style = m.styles.currentHalf
+	}
+	return style.Render(char)
 }
 
 func (m *Model) editingDisplay(width int) string {

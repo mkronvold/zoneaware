@@ -32,11 +32,11 @@ func TestBuildTracksTimezoneOffsetAcrossDST(t *testing.T) {
 		t.Fatalf("Build() after DST error = %v", err)
 	}
 
-	if !beforeDST.Members[0].Cells[0].Available {
+	if !beforeDST.Members[0].Cells[0].Halves[0] || !beforeDST.Members[0].Cells[0].Halves[1] {
 		t.Fatal("before DST slot should be available at 14:00 UTC")
 	}
 
-	if !afterDST.Members[0].Cells[0].Available {
+	if !afterDST.Members[0].Cells[0].Halves[0] || !afterDST.Members[0].Cells[0].Halves[1] {
 		t.Fatal("after DST slot should be available at 13:00 UTC")
 	}
 }
@@ -63,7 +63,7 @@ func TestBuildHandlesOvernightRanges(t *testing.T) {
 
 	got := make([]bool, 0, len(window.Members[0].Cells))
 	for _, cell := range window.Members[0].Cells {
-		got = append(got, cell.Available)
+		got = append(got, cell.Halves[0] || cell.Halves[1])
 	}
 
 	want := []bool{false, true, true, true, true}

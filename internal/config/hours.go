@@ -19,6 +19,18 @@ func (cfg *Config) ToggleMemberHour(name string, slotStart time.Time) error {
 }
 
 func (member *TeamMember) ToggleHour(slotStart time.Time) error {
+	return member.toggleInterval(slotStart, time.Hour)
+}
+
+func (member *TeamMember) ToggleHalfHour(slotStart time.Time, halfIndex int) error {
+	if halfIndex < 0 || halfIndex > 1 {
+		return fmt.Errorf("halfIndex must be 0 or 1, got %d", halfIndex)
+	}
+
+	return member.toggleInterval(slotStart.Add(time.Duration(halfIndex)*30*time.Minute), 30*time.Minute)
+}
+
+func (member *TeamMember) toggleInterval(intervalStart time.Time, duration time.Duration) error {
 	location, err := time.LoadLocation(member.Timezone)
 	if err != nil {
 		return fmt.Errorf("load timezone: %w", err)
@@ -29,7 +41,7 @@ func (member *TeamMember) ToggleHour(slotStart time.Time) error {
 		return err
 	}
 
-	quarterIndexes := localQuarterIndexes(slotStart, location)
+	quarterIndexes := intervalQuarterIndexes(intervalStart, duration, location)
 	allEnabled := true
 	for _, index := range quarterIndexes {
 		if !slots[index] {
@@ -169,11 +181,16 @@ func containsMinute(start, end, minuteOfDay int) bool {
 	return minuteOfDay >= start || minuteOfDay < end
 }
 
-func localQuarterIndexes(slotStart time.Time, location *time.Location) []int {
-	indexes := make([]int, 0, 4)
+func intervalQuarterIndexes(start time.Time, duration time.Duration, location *time.Location) []int {
+	steps := int(duration / (15 * time.Minute))
+	if steps < 1 {
+		steps = 1
+	}
+
+	indexes := make([]int, 0, steps)
 	seen := make(map[int]bool)
-	for sample := 0; sample < 4; sample++ {
-		local := slotStart.Add(time.Duration(sample) * 15 * time.Minute).In(location)
+	for sample := 0; sample < steps; sample++ {
+		local := start.Add(time.Duration(sample) * 15 * time.Minute).In(location)
 		index := (local.Hour()*60 + local.Minute()) / quarterMinutes
 		if seen[index] {
 			continue

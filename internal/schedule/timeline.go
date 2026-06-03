@@ -21,8 +21,8 @@ type MemberTimeline struct {
 }
 
 type Cell struct {
-	Start     time.Time
-	Available bool
+	Start  time.Time
+	Halves [2]bool
 }
 
 type workingRange struct {
@@ -72,8 +72,11 @@ func Build(cfg config.Config, now time.Time, hours int) (Window, error) {
 		for i := 0; i < hours; i++ {
 			slotStart := start.Add(time.Duration(i) * time.Hour)
 			timeline.Cells[i] = Cell{
-				Start:     slotStart,
-				Available: slotIsAvailable(slotStart, location, ranges),
+				Start: slotStart,
+				Halves: [2]bool{
+					intervalIsAvailable(slotStart, 30*time.Minute, location, ranges),
+					intervalIsAvailable(slotStart.Add(30*time.Minute), 30*time.Minute, location, ranges),
+				},
 			}
 		}
 
@@ -109,9 +112,14 @@ func parseWorkingRanges(input []config.WorkingHours) ([]workingRange, error) {
 	return ranges, nil
 }
 
-func slotIsAvailable(slotStart time.Time, location *time.Location, ranges []workingRange) bool {
-	for sample := 0; sample < 4; sample++ {
-		local := slotStart.Add(time.Duration(sample) * 15 * time.Minute).In(location)
+func intervalIsAvailable(intervalStart time.Time, duration time.Duration, location *time.Location, ranges []workingRange) bool {
+	steps := int(duration / (15 * time.Minute))
+	if steps < 1 {
+		steps = 1
+	}
+
+	for sample := 0; sample < steps; sample++ {
+		local := intervalStart.Add(time.Duration(sample) * 15 * time.Minute).In(location)
 		minuteOfDay := local.Hour()*60 + local.Minute()
 		for _, workRange := range ranges {
 			if containsMinute(workRange, minuteOfDay) {

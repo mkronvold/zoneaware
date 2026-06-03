@@ -353,7 +353,7 @@ func TestHandleClickTogglesOnlyTargetCell(t *testing.T) {
 	var target hotspot
 	found := false
 	for _, spot := range model.hotspots {
-		if spot.kind == hotspotCell && spot.index == 0 && spot.slotStart.Equal(targetTime) {
+		if spot.kind == hotspotCell && spot.index == 0 && spot.half == 0 && spot.slotStart.Equal(targetTime) {
 			target = spot
 			found = true
 			break
@@ -365,14 +365,14 @@ func TestHandleClickTogglesOnlyTargetCell(t *testing.T) {
 
 	model.handleClick(target.x1, target.y)
 
-	slots, err := config.HourlySlots(model.cfg.Team[0].WorkingHours)
+	slots, err := config.QuarterHourSlots(model.cfg.Team[0].WorkingHours)
 	if err != nil {
-		t.Fatalf("HourlySlots() error = %v", err)
+		t.Fatalf("QuarterHourSlots() error = %v", err)
 	}
-	for hour, enabled := range slots {
-		want := hour == 16
+	for quarter, enabled := range slots {
+		want := quarter == 16*4 || quarter == 16*4+1
 		if enabled != want {
-			t.Fatalf("slot %d = %t, want %t", hour, enabled, want)
+			t.Fatalf("quarter %d = %t, want %t", quarter, enabled, want)
 		}
 	}
 }
@@ -397,7 +397,7 @@ func TestHandleClickTogglesOnlySelectedCellForHalfHourOffset(t *testing.T) {
 	var target hotspot
 	found := false
 	for _, spot := range model.hotspots {
-		if spot.kind == hotspotCell && spot.index == 0 && spot.slotStart.Equal(time.Date(2024, 6, 3, 1, 0, 0, 0, time.UTC)) {
+		if spot.kind == hotspotCell && spot.index == 0 && spot.half == 0 && spot.slotStart.Equal(time.Date(2024, 6, 3, 1, 0, 0, 0, time.UTC)) {
 			target = spot
 			found = true
 			break
@@ -415,11 +415,12 @@ func TestHandleClickTogglesOnlySelectedCellForHalfHourOffset(t *testing.T) {
 	}
 
 	got := []bool{
-		window.Members[0].Cells[0].Available,
-		window.Members[0].Cells[1].Available,
-		window.Members[0].Cells[2].Available,
+		window.Members[0].Cells[0].Halves[0] || window.Members[0].Cells[0].Halves[1],
+		window.Members[0].Cells[1].Halves[0],
+		window.Members[0].Cells[1].Halves[1],
+		window.Members[0].Cells[2].Halves[0] || window.Members[0].Cells[2].Halves[1],
 	}
-	want := []bool{false, true, false}
+	want := []bool{false, true, false, false}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("cell %d = %t, want %t (got=%v)", i, got[i], want[i], got)
