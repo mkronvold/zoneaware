@@ -4,4 +4,4 @@
 *.test
 coverage.out
 .bin/
-za
+/za

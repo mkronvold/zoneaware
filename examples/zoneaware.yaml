@@ -1,4 +1,4 @@
-reference_timezone: UTC
+reference_timezone: America/Chicago
 window_hours: 48
 team:
   - name: Alice
