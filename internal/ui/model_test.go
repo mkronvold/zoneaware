@@ -128,6 +128,7 @@ func TestDisplayedTimezonesUsesLiveFilter(t *testing.T) {
 
 func TestDisplayedTimezonesScrollsWindow(t *testing.T) {
 	model := NewModel(config.Config{ReferenceTimezone: "UTC"}, "", time.Now)
+	model.height = 8
 	model.timezoneOptions = []string{
 		"Africa/Abidjan",
 		"Africa/Accra",
@@ -260,6 +261,55 @@ func TestSelectMemberTimezoneUpdatesConfig(t *testing.T) {
 
 	if model.cfg.Team[0].Timezone != "America/Denver" {
 		t.Fatalf("member timezone = %q, want America/Denver", model.cfg.Team[0].Timezone)
+	}
+}
+
+func TestMemberTimezoneLabelsRemainWhenHeaderTimezoneHidden(t *testing.T) {
+	cfg := config.Config{
+		ReferenceTimezone: "UTC",
+		WindowHours:       24,
+		Team: []config.TeamMember{
+			{
+				Name:         "Alice",
+				Timezone:     "America/Denver",
+				WorkingHours: []config.WorkingHours{{Start: "09:00", End: "17:00"}},
+			},
+		},
+	}
+
+	model := NewModel(cfg, "", func() time.Time {
+		return time.Date(2024, 6, 3, 12, 0, 0, 0, time.UTC)
+	})
+	model.hiddenZones["America/Denver"] = true
+	model.width = 110
+	model.height = 14
+
+	view := model.View()
+	if !strings.Contains(view, "MDT") {
+		t.Fatalf("expected member timezone label to remain visible:\n%s", view)
+	}
+}
+
+func TestEditingRowIsSoftHighlighted(t *testing.T) {
+	cfg := config.Config{
+		ReferenceTimezone: "UTC",
+		WindowHours:       24,
+		Team: []config.TeamMember{
+			{Name: "Alice", Timezone: "America/Denver", WorkingHours: []config.WorkingHours{{Start: "09:00", End: "17:00"}}},
+		},
+	}
+
+	model := NewModel(cfg, "", func() time.Time {
+		return time.Date(2024, 6, 3, 12, 0, 0, 0, time.UTC)
+	})
+	model.width = 110
+	model.height = 14
+	baseView := model.View()
+	model.beginEditMember(0)
+
+	view := model.View()
+	if view == baseView {
+		t.Fatalf("expected edit row rendering to differ from base view")
 	}
 }
 

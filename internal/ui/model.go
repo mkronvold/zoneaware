@@ -14,11 +14,10 @@ import (
 )
 
 const (
-	minWidth           = 48
-	cellWidth          = 3
-	minNameWidth       = 8
-	baseFrameRows      = 8
-	maxTimezoneOptions = 6
+	minWidth      = 48
+	cellWidth     = 3
+	minNameWidth  = 8
+	baseFrameRows = 8
 )
 
 type hotspotKind int
@@ -63,6 +62,7 @@ type styles struct {
 	pickerInput      lipgloss.Style
 	pickerOption     lipgloss.Style
 	pickerSelected   lipgloss.Style
+	rowEditing       lipgloss.Style
 }
 
 type Model struct {
@@ -117,6 +117,7 @@ func NewModel(cfg config.Config, configPath string, now func() time.Time) *Model
 			pickerInput:      lipgloss.NewStyle().Foreground(lipgloss.Color("222")).Bold(true),
 			pickerOption:     lipgloss.NewStyle().Foreground(lipgloss.Color("252")),
 			pickerSelected:   lipgloss.NewStyle().Foreground(lipgloss.Color("222")).Bold(true),
+			rowEditing:       lipgloss.NewStyle().Background(lipgloss.Color("236")),
 		},
 	}
 }
@@ -197,7 +198,7 @@ func (m *Model) View() string {
 	visibleConfigMembers := m.visibleConfigMembers()
 	visibleZones := m.visibleConfigZones(visibleConfigMembers)
 	nameWidth := m.nameColumnWidth()
-	labelWidth := zoneLabelWidth(visibleZones)
+	labelWidth := max(zoneLabelWidth(visibleZones), teamMemberZoneLabelWidth(visibleConfigMembers, m.renderNow))
 	visibleHours := m.hourCount(nameWidth, labelWidth)
 	if visibleHours < 1 {
 		return m.renderMessage("Terminal is too narrow to render any timeline columns.", "q to quit")
@@ -224,9 +225,8 @@ func (m *Model) View() string {
 	}
 
 	visibleZones = m.visibleZoneLabels(visibleRows)
-	labelWidth = zoneLabelWidth(visibleZones)
-	pickerRows := m.referencePickerRows()
-	requiredHeight := m.requiredHeight(len(visibleRows), len(visibleZones), pickerRows)
+	labelWidth = max(zoneLabelWidth(visibleZones), visibleMemberZoneLabelWidth(visibleRows, m.renderNow))
+	requiredHeight := m.requiredHeight(len(visibleRows), len(visibleZones))
 	if m.height < requiredHeight {
 		return m.renderMessage(
 			fmt.Sprintf("Need at least %d rows to fit %d visible team members; current height is %d.", requiredHeight, len(visibleRows), m.height),
@@ -241,12 +241,6 @@ func (m *Model) View() string {
 	lines = append(lines, m.renderLine(m.renderStatusLine(1, window, fullWindow.Hours, visibleRows)))
 
 	currentY := 2
-	if m.pickerOpen {
-		pickerLines := m.renderReferencePicker(currentY)
-		lines = append(lines, pickerLines...)
-		currentY += len(pickerLines)
-	}
-
 	lines = append(lines, m.renderSeparator())
 	currentY++
 
@@ -271,6 +265,10 @@ func (m *Model) View() string {
 	lines = append(lines, m.renderLine(m.renderHiddenLine()))
 	currentY++
 	lines = append(lines, m.renderLine(m.renderFooterActions(currentY)))
+
+	if m.pickerOpen {
+		lines = m.overlayReferencePicker(lines, 1)
+	}
 
 	return strings.Join(lines, "\n")
 }
@@ -373,7 +371,7 @@ func (m *Model) renderStatusLine(lineY int, window schedule.Window, totalHours i
 }
 
 func (m *Model) renderReferencePicker(startY int) []string {
-	lines := make([]string, 0, m.referencePickerRows())
+	lines := make([]string, 0, m.pickerVisibleRows())
 	filter := m.pickerFilter
 	if filter == "" {
 		filter = "type to filter timezones"
@@ -408,6 +406,24 @@ func (m *Model) renderReferencePicker(startY int) []string {
 		})
 	}
 
+	return lines
+}
+
+func (m *Model) overlayReferencePicker(lines []string, startY int) []string {
+	overlay := m.renderReferencePicker(startY)
+	if len(lines) < m.height {
+		for len(lines) < m.height {
+			lines = append(lines, m.renderLine(""))
+		}
+	}
+	for index, line := range overlay {
+		target := startY + index
+		if target >= len(lines) {
+			lines = append(lines, line)
+			continue
+		}
+		lines[target] = line
+	}
 	return lines
 }
 
@@ -496,7 +512,7 @@ func (m *Model) renderMemberRow(nameWidth, labelWidth int, row visibleMember, li
 	}
 
 	rightLabel := ""
-	if !m.hiddenZones[row.timeline.Timezone] && labelWidth > 0 {
+	if labelWidth > 0 {
 		rightLabel = m.styles.timezone.Render(padLeft(zoneLabel(row.timeline.Timezone, m.renderNow), labelWidth))
 		m.hotspots = append(m.hotspots, hotspot{
 			kind:  hotspotMemberTimezone,
@@ -508,7 +524,12 @@ func (m *Model) renderMemberRow(nameWidth, labelWidth int, row visibleMember, li
 		})
 	}
 
-	return m.composeTimelineRow("", builder.String(), rightLabel)
+	rowText := m.composeTimelineRow("", builder.String(), rightLabel)
+	if row.index == m.editingIndex {
+		return m.styles.rowEditing.Render(padANSI(rowText, m.contentWidth()))
+	}
+
+	return rowText
 }
 
 func (m *Model) renderHiddenLine() string {
@@ -557,13 +578,20 @@ func (m *Model) renderFooterActions(lineY int) string {
 }
 
 func (m *Model) handleClick(x, y int) {
-	for _, spot := range m.hotspots {
+	for i := len(m.hotspots) - 1; i >= 0; i-- {
+		spot := m.hotspots[i]
 		if y != spot.y || x < spot.x1 || x >= spot.x2 {
 			continue
 		}
 
 		switch spot.kind {
 		case hotspotMember:
+			if m.editingIndex == spot.index {
+				if err := m.commitEditMember(); err != nil {
+					m.lastError = err.Error()
+				}
+				return
+			}
 			m.beginEditMember(spot.index)
 		case hotspotTimezone:
 			m.hiddenZones[spot.value] = !m.hiddenZones[spot.value]
@@ -816,11 +844,12 @@ func (m *Model) filteredTimezones() []string {
 
 func (m *Model) displayedTimezones() []string {
 	options := m.filteredTimezones()
-	if len(options) <= maxTimezoneOptions {
+	maxOptions := m.pickerVisibleOptions()
+	if len(options) <= maxOptions {
 		return options
 	}
 
-	maxOffset := len(options) - maxTimezoneOptions
+	maxOffset := len(options) - maxOptions
 	if m.pickerOffset < 0 {
 		m.pickerOffset = 0
 	}
@@ -828,11 +857,11 @@ func (m *Model) displayedTimezones() []string {
 		m.pickerOffset = maxOffset
 	}
 
-	end := min(len(options), m.pickerOffset+maxTimezoneOptions)
+	end := min(len(options), m.pickerOffset+maxOptions)
 	return options[m.pickerOffset:end]
 }
 
-func (m *Model) referencePickerRows() int {
+func (m *Model) pickerVisibleRows() int {
 	if !m.pickerOpen {
 		return 0
 	}
@@ -841,10 +870,15 @@ func (m *Model) referencePickerRows() int {
 	if optionCount == 0 {
 		return 2
 	}
-	if optionCount > maxTimezoneOptions {
-		optionCount = maxTimezoneOptions
+	maxOptions := m.pickerVisibleOptions()
+	if optionCount > maxOptions {
+		optionCount = maxOptions
 	}
 	return 1 + optionCount
+}
+
+func (m *Model) pickerVisibleOptions() int {
+	return max(1, m.height-2)
 }
 
 func (m *Model) movePicker(delta int) {
@@ -866,8 +900,9 @@ func (m *Model) movePicker(delta int) {
 	if m.pickerSelection < m.pickerOffset {
 		m.pickerOffset = m.pickerSelection
 	}
-	if m.pickerSelection >= m.pickerOffset+maxTimezoneOptions {
-		m.pickerOffset = m.pickerSelection - maxTimezoneOptions + 1
+	maxOptions := m.pickerVisibleOptions()
+	if m.pickerSelection >= m.pickerOffset+maxOptions {
+		m.pickerOffset = m.pickerSelection - maxOptions + 1
 	}
 }
 
@@ -935,8 +970,8 @@ func (m *Model) hourCount(nameWidth, labelWidth int) int {
 	return hours
 }
 
-func (m *Model) requiredHeight(memberCount, zoneCount, pickerRows int) int {
-	return baseFrameRows + zoneCount + pickerRows + memberCount
+func (m *Model) requiredHeight(memberCount, zoneCount int) int {
+	return baseFrameRows + zoneCount + memberCount
 }
 
 func (m *Model) currentVisibleHourCount() int {
@@ -1042,6 +1077,22 @@ func zoneLabelWidth(zones []zoneInfo) int {
 		width = max(width, lipgloss.Width(zone.label))
 	}
 
+	return width
+}
+
+func teamMemberZoneLabelWidth(members []config.TeamMember, now time.Time) int {
+	width := 0
+	for _, member := range members {
+		width = max(width, lipgloss.Width(zoneLabel(member.Timezone, now)))
+	}
+	return width
+}
+
+func visibleMemberZoneLabelWidth(members []visibleMember, now time.Time) int {
+	width := 0
+	for _, member := range members {
+		width = max(width, lipgloss.Width(zoneLabel(member.timeline.Timezone, now)))
+	}
 	return width
 }
 
