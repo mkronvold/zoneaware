@@ -18,10 +18,10 @@ func TestZellijPaneSize(t *testing.T) {
 
 	width, height := ZellijPaneSize(cfg, time.Date(2024, 6, 3, 12, 0, 0, 0, time.UTC), 24)
 
-	if width != 87 {
-		t.Fatalf("width = %d, want 87", width)
+	if width != 89 {
+		t.Fatalf("width = %d, want 89", width)
 	}
-	if height != 14 {
-		t.Fatalf("height = %d, want 14", height)
+	if height != 16 {
+		t.Fatalf("height = %d, want 16", height)
 	}
 }

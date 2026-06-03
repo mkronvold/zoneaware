@@ -9,9 +9,11 @@ import (
 )
 
 const (
-	minNameWidth  = 8
-	baseFrameRows = 8
-	cellWidth     = 3
+	minNameWidth    = 8
+	baseFrameRows   = 8
+	cellWidth       = 3
+	zellijFrameRows = 2
+	zellijFrameCols = 2
 )
 
 func ZellijPaneSize(cfg config.Config, now time.Time, hours int) (width int, height int) {
@@ -29,8 +31,8 @@ func ZellijPaneSize(cfg config.Config, now time.Time, hours int) (width int, hei
 		}
 	}
 
-	width = nameWidth + 1 + labelWidth + 1 + hours*cellWidth
-	height = baseFrameRows + len(cfg.Team) + len(seenZones)
+	width = nameWidth + 1 + labelWidth + 1 + hours*cellWidth + zellijFrameCols
+	height = baseFrameRows + len(cfg.Team) + len(seenZones) + zellijFrameRows
 	return width, height
 }
 
