@@ -74,10 +74,10 @@ func TestViewRendersTimezoneHeaderRowsAndMemberSuffixes(t *testing.T) {
 		t.Fatalf("expected MDT to appear in both header and member row:\n%s", view)
 	}
 
-	if !strings.Contains(plain, "Hours") {
-		t.Fatalf("expected hours header to be rendered:\n%s", plain)
+	if !strings.Contains(plain, "hrs") {
+		t.Fatalf("expected hrs header to be rendered:\n%s", plain)
 	}
-	if !strings.Contains(plain, "PDT 8h") || !strings.Contains(plain, "MDT 8h") {
+	if !strings.Contains(plain, "PDT  8h") || !strings.Contains(plain, "MDT  8h") {
 		t.Fatalf("expected member rows to include total schedule hours:\n%s", plain)
 	}
 
@@ -419,7 +419,7 @@ func TestHoursHeaderTogglesHoursColumnAndShowAllRestoresIt(t *testing.T) {
 	model.height = 15
 
 	plain := stripANSI(model.View())
-	if !strings.Contains(plain, "Hours") || !strings.Contains(plain, "UTC 8h") {
+	if !strings.Contains(plain, "hrs") || !strings.Contains(plain, "UTC  8h") {
 		t.Fatalf("expected initial hours column:\n%s", plain)
 	}
 
@@ -433,7 +433,7 @@ func TestHoursHeaderTogglesHoursColumnAndShowAllRestoresIt(t *testing.T) {
 		}
 	}
 	if !foundHeader {
-		t.Fatal("expected Hours header hotspot")
+		t.Fatal("expected hrs header hotspot")
 	}
 
 	model.handleClick(header.x1, header.y)
@@ -442,11 +442,11 @@ func TestHoursHeaderTogglesHoursColumnAndShowAllRestoresIt(t *testing.T) {
 	}
 
 	hiddenPlain := stripANSI(model.View())
-	if strings.Contains(hiddenPlain, "UTC 8h") {
+	if strings.Contains(hiddenPlain, "UTC  8h") {
 		t.Fatalf("expected hours values to be hidden:\n%s", hiddenPlain)
 	}
-	if !strings.Contains(hiddenPlain, "Hidden: Hours") {
-		t.Fatalf("expected hidden summary to include Hours:\n%s", hiddenPlain)
+	if !strings.Contains(hiddenPlain, "Hidden: hrs") {
+		t.Fatalf("expected hidden summary to include hrs:\n%s", hiddenPlain)
 	}
 
 	var showAll hotspot
@@ -468,7 +468,7 @@ func TestHoursHeaderTogglesHoursColumnAndShowAllRestoresIt(t *testing.T) {
 	}
 
 	resetPlain := stripANSI(model.View())
-	if !strings.Contains(resetPlain, "Hours") || !strings.Contains(resetPlain, "UTC 8h") {
+	if !strings.Contains(resetPlain, "hrs") || !strings.Contains(resetPlain, "UTC  8h") {
 		t.Fatalf("expected Show All to restore hours column:\n%s", resetPlain)
 	}
 }

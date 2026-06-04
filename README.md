@@ -18,7 +18,7 @@ Use `./run.sh -config /path/to/zoneaware.yaml` to point at a different config fi
 - Click a member name to edit it inline and save the new name
 - Click the right-side timezone on a member row to change that member's timezone
 - The far-right member column shows the total scheduled hours for that person
-- Click the `Hours` header to hide or show that summary column with `Show All`
+- Click the `hrs` header to hide or show that summary column with `Show All`
 - Click a right-side timezone label in the header to hide that timezone row
 - Click `Show All` to reset hidden rows and timezones
 - Click `[ Add ]` at the bottom to create a new team member

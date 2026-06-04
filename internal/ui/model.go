@@ -18,6 +18,7 @@ const (
 	cellWidth     = 3
 	minNameWidth  = 8
 	baseFrameRows = 8
+	hoursLabel    = "hrs"
 )
 
 type hotspotKind int
@@ -280,7 +281,7 @@ func (m *Model) View() string {
 	}
 	currentY += len(visibleRows)
 
-	lines = append(lines, m.renderLine(m.styles.muted.Render("Click a cell to toggle that hour · click a name to edit it · click a header timezone or Hours to hide it · click a member timezone or Local Reference to change it · wheel scrolls time horizontally · Ctrl+L refresh · r resets · q quits")))
+	lines = append(lines, m.renderLine(m.styles.muted.Render("Click a cell to toggle that hour · click a name to edit it · click a header timezone or hrs to hide it · click a member timezone or Local Reference to change it · wheel scrolls time horizontally · Ctrl+L refresh · r resets · q quits")))
 	currentY++
 	lines = append(lines, m.renderSeparator())
 	currentY++
@@ -478,7 +479,7 @@ func (m *Model) renderHoursHeaderRow(nameWidth, labelWidth, hoursWidth int, wind
 	cells := strings.Repeat(" ", window.Hours*cellWidth)
 	label := m.renderRightColumns(
 		strings.Repeat(" ", labelWidth),
-		m.styles.timezone.Render(padLeft("Hours", hoursWidth)),
+		m.styles.timezone.Render(padLeft(hoursLabel, hoursWidth)),
 	)
 	m.hotspots = append(m.hotspots, hotspot{
 		kind: hotspotHoursHeader,
@@ -596,7 +597,7 @@ func (m *Model) renderHiddenLine() string {
 		items = append(items, zoneLabel(member.Timezone, m.renderNow))
 	}
 	if m.hiddenHours {
-		items = append(items, "Hours")
+		items = append(items, hoursLabel)
 	}
 
 	if len(items) == 0 {
@@ -1183,7 +1184,7 @@ func (m *Model) hoursColumnWidth(members []config.TeamMember) int {
 }
 
 func memberScheduleHoursWidth(members []config.TeamMember) int {
-	width := 0
+	width := lipgloss.Width(hoursLabel)
 	for _, member := range members {
 		width = max(width, lipgloss.Width(memberScheduleHoursLabel(member)))
 	}
