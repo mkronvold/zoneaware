@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -63,16 +64,24 @@ func TestViewRendersTimezoneHeaderRowsAndMemberSuffixes(t *testing.T) {
 	model.height = 18
 
 	view := model.View()
+	plain := stripANSI(view)
 
-	if strings.Count(view, "PDT") < 2 {
+	if strings.Count(plain, "PDT") < 2 {
 		t.Fatalf("expected PDT to appear in both header and member row:\n%s", view)
 	}
 
-	if strings.Count(view, "MDT") < 2 {
+	if strings.Count(plain, "MDT") < 2 {
 		t.Fatalf("expected MDT to appear in both header and member row:\n%s", view)
 	}
 
-	if strings.Index(view, "PDT") > strings.Index(view, "Alice") {
+	if !strings.Contains(plain, "Hours") {
+		t.Fatalf("expected hours header to be rendered:\n%s", plain)
+	}
+	if !strings.Contains(plain, "PDT 8h") || !strings.Contains(plain, "MDT 8h") {
+		t.Fatalf("expected member rows to include total schedule hours:\n%s", plain)
+	}
+
+	if strings.Index(plain, "PDT") > strings.Index(plain, "Alice") {
 		t.Fatalf("expected timezone header rows before member rows:\n%s", view)
 	}
 }
@@ -110,6 +119,70 @@ func TestVisibleZoneLabelsSortByCurrentLocalTime(t *testing.T) {
 		t.Fatalf("unexpected third zone: %#v", zones)
 	}
 }
+
+func TestZoneHeaderPaddingOnlyForHalfHourOffsets(t *testing.T) {
+	model := NewModel(config.Config{}, "", time.Now)
+	model.width = 40
+
+	utc, err := time.LoadLocation("UTC")
+	if err != nil {
+		t.Fatalf("LoadLocation UTC error = %v", err)
+	}
+	kolkata, err := time.LoadLocation("Asia/Kolkata")
+	if err != nil {
+		t.Fatalf("LoadLocation Kolkata error = %v", err)
+	}
+
+	start := time.Date(2024, 6, 3, 12, 0, 0, 0, time.UTC)
+	if got := model.zoneHeaderPadding(start, utc); got != "" {
+		t.Fatalf("zoneHeaderPadding UTC = %q, want empty", got)
+	}
+	if got := model.zoneHeaderPadding(start, kolkata); got != " " {
+		t.Fatalf("zoneHeaderPadding Kolkata = %q, want single space", got)
+	}
+
+	utcCells := stripANSI(model.renderZoneHeaderCells(start, 3, utc))
+	kolkataCells := stripANSI(model.renderZoneHeaderCells(start, 3, kolkata))
+	if strings.Contains(utcCells, "│") || strings.Contains(kolkataCells, "│") {
+		t.Fatalf("expected header cells without vertical dividers: UTC=%q Kolkata=%q", utcCells, kolkataCells)
+	}
+	if len(utcCells) != len(kolkataCells) {
+		t.Fatalf("expected equal header widths: UTC=%q Kolkata=%q", utcCells, kolkataCells)
+	}
+	if !strings.HasPrefix(kolkataCells, " 17") {
+		t.Fatalf("expected Kolkata header cells to start with a one-character shift, got %q", kolkataCells)
+	}
+
+	utcRow := stripANSI(model.renderZoneHeaderRow(4, 3, 0, schedule.Window{Start: start, Hours: 3}, zoneInfo{id: "UTC", label: "UTC"}, 0, utc))
+	kolkataRow := stripANSI(model.renderZoneHeaderRow(4, 3, 0, schedule.Window{Start: start, Hours: 3}, zoneInfo{id: "Asia/Kolkata", label: "IST"}, 1, utc))
+	if strings.Index(utcRow, "UTC") != strings.Index(kolkataRow, "IST") {
+		t.Fatalf("expected header labels to stay aligned: UTC=%q Kolkata=%q", utcRow, kolkataRow)
+	}
+}
+
+func TestFormatQuarterHours(t *testing.T) {
+	cases := map[int]string{
+		0:  "0h",
+		1:  "0.25h",
+		2:  "0.5h",
+		3:  "0.75h",
+		4:  "1h",
+		30: "7.5h",
+		31: "7.75h",
+	}
+
+	for quarters, want := range cases {
+		if got := formatQuarterHours(quarters); got != want {
+			t.Fatalf("formatQuarterHours(%d) = %q, want %q", quarters, got, want)
+		}
+	}
+}
+
+func stripANSI(value string) string {
+	return ansiPattern.ReplaceAllString(value, "")
+}
+
+var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func TestDisplayedTimezonesUsesLiveFilter(t *testing.T) {
 	model := NewModel(config.Config{ReferenceTimezone: "UTC"}, "", time.Now)
@@ -329,6 +402,74 @@ func TestEditingRowIsSoftHighlighted(t *testing.T) {
 	view := model.View()
 	if view == baseView {
 		t.Fatalf("expected edit row rendering to differ from base view")
+	}
+}
+
+func TestHoursHeaderTogglesHoursColumnAndShowAllRestoresIt(t *testing.T) {
+	model := NewModel(config.Config{
+		ReferenceTimezone: "UTC",
+		WindowHours:       24,
+		Team: []config.TeamMember{
+			{Name: "Alice", Timezone: "UTC", WorkingHours: []config.WorkingHours{{Start: "09:00", End: "17:00"}}},
+		},
+	}, "", func() time.Time {
+		return time.Date(2024, 6, 3, 12, 0, 0, 0, time.UTC)
+	})
+	model.width = 110
+	model.height = 15
+
+	plain := stripANSI(model.View())
+	if !strings.Contains(plain, "Hours") || !strings.Contains(plain, "UTC 8h") {
+		t.Fatalf("expected initial hours column:\n%s", plain)
+	}
+
+	var header hotspot
+	foundHeader := false
+	for _, spot := range model.hotspots {
+		if spot.kind == hotspotHoursHeader {
+			header = spot
+			foundHeader = true
+			break
+		}
+	}
+	if !foundHeader {
+		t.Fatal("expected Hours header hotspot")
+	}
+
+	model.handleClick(header.x1, header.y)
+	if !model.hiddenHours {
+		t.Fatal("expected hours column to be hidden after clicking header")
+	}
+
+	hiddenPlain := stripANSI(model.View())
+	if strings.Contains(hiddenPlain, "UTC 8h") {
+		t.Fatalf("expected hours values to be hidden:\n%s", hiddenPlain)
+	}
+	if !strings.Contains(hiddenPlain, "Hidden: Hours") {
+		t.Fatalf("expected hidden summary to include Hours:\n%s", hiddenPlain)
+	}
+
+	var showAll hotspot
+	foundShowAll := false
+	for _, spot := range model.hotspots {
+		if spot.kind == hotspotShowAll {
+			showAll = spot
+			foundShowAll = true
+			break
+		}
+	}
+	if !foundShowAll {
+		t.Fatal("expected Show All hotspot")
+	}
+
+	model.handleClick(showAll.x1, showAll.y)
+	if model.hiddenHours {
+		t.Fatal("expected Show All to restore hours column")
+	}
+
+	resetPlain := stripANSI(model.View())
+	if !strings.Contains(resetPlain, "Hours") || !strings.Contains(resetPlain, "UTC 8h") {
+		t.Fatalf("expected Show All to restore hours column:\n%s", resetPlain)
 	}
 }
 

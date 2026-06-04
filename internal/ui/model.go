@@ -26,6 +26,7 @@ const (
 	hotspotMember hotspotKind = iota
 	hotspotTimezone
 	hotspotMemberTimezone
+	hotspotHoursHeader
 	hotspotCell
 	hotspotShowAll
 	hotspotAdd
@@ -79,6 +80,7 @@ type Model struct {
 	timeOffset      int
 	hiddenMembers   map[string]bool
 	hiddenZones     map[string]bool
+	hiddenHours     bool
 	hotspots        []hotspot
 	styles          styles
 	lastError       string
@@ -161,6 +163,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			m.hiddenMembers = make(map[string]bool)
 			m.hiddenZones = make(map[string]bool)
+			m.hiddenHours = false
 			m.timeOffset = 0
 			m.lastError = ""
 			m.cancelEditMember()
@@ -208,7 +211,8 @@ func (m *Model) View() string {
 	visibleZones := m.visibleConfigZones(visibleConfigMembers)
 	nameWidth := m.nameColumnWidth()
 	labelWidth := max(zoneLabelWidth(visibleZones), teamMemberZoneLabelWidth(visibleConfigMembers, m.renderNow))
-	visibleHours := m.hourCount(nameWidth, labelWidth)
+	hoursWidth := m.hoursColumnWidth(visibleConfigMembers)
+	visibleHours := m.hourCount(nameWidth, rightColumnWidth(labelWidth, hoursWidth))
 	if visibleHours < 1 {
 		return m.renderMessage("Terminal is too narrow to render any timeline columns.", "q to quit")
 	}
@@ -240,7 +244,7 @@ func (m *Model) View() string {
 
 	visibleZones = m.visibleZoneLabels(visibleRows)
 	labelWidth = max(zoneLabelWidth(visibleZones), visibleMemberZoneLabelWidth(visibleRows, m.renderNow))
-	requiredHeight := m.requiredHeight(len(visibleRows), len(visibleZones))
+	requiredHeight := m.requiredHeight(len(visibleRows), len(visibleZones), hoursWidth > 0)
 	if m.height < requiredHeight {
 		return m.renderMessage(
 			fmt.Sprintf("Need at least %d rows to fit %d visible team members; current height is %d.", requiredHeight, len(visibleRows), m.height),
@@ -259,7 +263,11 @@ func (m *Model) View() string {
 	currentY++
 
 	for _, zone := range visibleZones {
-		lines = append(lines, m.renderLine(m.renderZoneHeaderRow(nameWidth, labelWidth, window, zone, currentY, referenceLocation)))
+		lines = append(lines, m.renderLine(m.renderZoneHeaderRow(nameWidth, labelWidth, hoursWidth, window, zone, currentY, referenceLocation)))
+		currentY++
+	}
+	if hoursWidth > 0 {
+		lines = append(lines, m.renderLine(m.renderHoursHeaderRow(nameWidth, labelWidth, hoursWidth, window, currentY)))
 		currentY++
 	}
 
@@ -268,11 +276,11 @@ func (m *Model) View() string {
 
 	for idx := 0; idx < len(visibleRows); idx++ {
 		lineY := currentY + idx
-		lines = append(lines, m.renderLine(m.renderMemberRow(nameWidth, labelWidth, visibleRows[idx], lineY, referenceLocation)))
+		lines = append(lines, m.renderLine(m.renderMemberRow(nameWidth, labelWidth, hoursWidth, visibleRows[idx], lineY, referenceLocation)))
 	}
 	currentY += len(visibleRows)
 
-	lines = append(lines, m.renderLine(m.styles.muted.Render("Click a cell to toggle that hour · click a name to edit it · click a header timezone to hide it · click a member timezone or Local Reference to change it · wheel scrolls time horizontally · Ctrl+L refresh · r resets · q quits")))
+	lines = append(lines, m.renderLine(m.styles.muted.Render("Click a cell to toggle that hour · click a name to edit it · click a header timezone or Hours to hide it · click a member timezone or Local Reference to change it · wheel scrolls time horizontally · Ctrl+L refresh · r resets · q quits")))
 	currentY++
 	lines = append(lines, m.renderSeparator())
 	currentY++
@@ -441,21 +449,42 @@ func (m *Model) overlayReferencePicker(lines []string, startY int) []string {
 	return lines
 }
 
-func (m *Model) renderZoneHeaderRow(nameWidth, labelWidth int, window schedule.Window, zone zoneInfo, lineY int, referenceLocation *time.Location) string {
+func (m *Model) renderZoneHeaderRow(nameWidth, labelWidth, hoursWidth int, window schedule.Window, zone zoneInfo, lineY int, referenceLocation *time.Location) string {
 	location, err := time.LoadLocation(zone.id)
 	if err != nil {
 		location = window.Start.Location()
 	}
 
 	left := strings.Repeat(" ", nameWidth+1)
-	cells := m.renderHourCells(window.Start, window.Hours, location, referenceLocation)
-	label := m.styles.timezone.Render(padLeft(zone.label, labelWidth))
+	cells := m.renderZoneHeaderCells(window.Start, window.Hours, location)
+	label := m.renderRightColumns(
+		m.styles.timezone.Render(padLeft(zone.label, labelWidth)),
+		strings.Repeat(" ", hoursWidth),
+	)
+	rightWidth := rightColumnWidth(labelWidth, hoursWidth)
 	m.hotspots = append(m.hotspots, hotspot{
 		kind:  hotspotTimezone,
 		value: zone.id,
-		x1:    m.contentWidth() - labelWidth,
-		x2:    m.contentWidth(),
+		x1:    m.contentWidth() - rightWidth,
+		x2:    m.contentWidth() - rightWidth + labelWidth,
 		y:     lineY,
+	})
+
+	return m.composeTimelineRow(left, cells, label)
+}
+
+func (m *Model) renderHoursHeaderRow(nameWidth, labelWidth, hoursWidth int, window schedule.Window, lineY int) string {
+	left := strings.Repeat(" ", nameWidth+1)
+	cells := strings.Repeat(" ", window.Hours*cellWidth)
+	label := m.renderRightColumns(
+		strings.Repeat(" ", labelWidth),
+		m.styles.timezone.Render(padLeft("Hours", hoursWidth)),
+	)
+	m.hotspots = append(m.hotspots, hotspot{
+		kind: hotspotHoursHeader,
+		x1:   m.contentWidth() - hoursWidth,
+		x2:   m.contentWidth(),
+		y:    lineY,
 	})
 
 	return m.composeTimelineRow(left, cells, label)
@@ -471,7 +500,7 @@ func (m *Model) renderTimelineDivider(nameWidth int, window schedule.Window, ref
 	return builder.String()
 }
 
-func (m *Model) renderMemberRow(nameWidth, labelWidth int, row visibleMember, lineY int, referenceLocation *time.Location) string {
+func (m *Model) renderMemberRow(nameWidth, labelWidth, hoursWidth int, row visibleMember, lineY int, referenceLocation *time.Location) string {
 	var builder strings.Builder
 	nameText := row.timeline.Name
 	if row.index == m.editingIndex {
@@ -522,16 +551,24 @@ func (m *Model) renderMemberRow(nameWidth, labelWidth int, row visibleMember, li
 	}
 
 	rightLabel := ""
+	rightWidth := rightColumnWidth(labelWidth, hoursWidth)
 	if labelWidth > 0 {
-		rightLabel = m.styles.timezone.Render(padLeft(zoneLabel(row.timeline.Timezone, m.renderNow), labelWidth))
+		timezoneText := m.styles.timezone.Render(padLeft(zoneLabel(row.timeline.Timezone, m.renderNow), labelWidth))
+		hoursText := ""
+		if hoursWidth > 0 {
+			hoursText = m.styles.info.Render(padLeft(memberScheduleHoursLabel(m.cfg.Team[row.index]), hoursWidth))
+		}
+		rightLabel = m.renderRightColumns(timezoneText, hoursText)
 		m.hotspots = append(m.hotspots, hotspot{
 			kind:  hotspotMemberTimezone,
 			value: row.timeline.Timezone,
 			index: row.index,
-			x1:    m.contentWidth() - labelWidth,
-			x2:    m.contentWidth(),
+			x1:    m.contentWidth() - rightWidth,
+			x2:    m.contentWidth() - rightWidth + labelWidth,
 			y:     lineY,
 		})
+	} else if hoursWidth > 0 {
+		rightLabel = m.styles.info.Render(padLeft(memberScheduleHoursLabel(m.cfg.Team[row.index]), hoursWidth))
 	}
 
 	rowText := m.composeTimelineRow("", builder.String(), rightLabel)
@@ -557,6 +594,9 @@ func (m *Model) renderHiddenLine() string {
 		}
 		seenZones[member.Timezone] = true
 		items = append(items, zoneLabel(member.Timezone, m.renderNow))
+	}
+	if m.hiddenHours {
+		items = append(items, "Hours")
 	}
 
 	if len(items) == 0 {
@@ -616,6 +656,9 @@ func (m *Model) handleClick(x, y int) {
 			if err := m.openTimezonePicker(spot.index); err != nil {
 				m.lastError = err.Error()
 			}
+		case hotspotHoursHeader:
+			m.hiddenHours = !m.hiddenHours
+			m.clampTimeOffset(config.EffectiveWindowHours(m.cfg), m.currentVisibleHourCount())
 		case hotspotCell:
 			if m.editingIndex >= 0 {
 				return
@@ -628,6 +671,7 @@ func (m *Model) handleClick(x, y int) {
 		case hotspotShowAll:
 			m.hiddenMembers = make(map[string]bool)
 			m.hiddenZones = make(map[string]bool)
+			m.hiddenHours = false
 			m.timeOffset = 0
 			m.lastError = ""
 			m.cancelEditMember()
@@ -981,10 +1025,10 @@ func (m *Model) nameColumnWidth() int {
 	return maxName
 }
 
-func (m *Model) hourCount(nameWidth, labelWidth int) int {
+func (m *Model) hourCount(nameWidth, rightWidth int) int {
 	usable := m.contentWidth() - nameWidth - 1
-	if labelWidth > 0 {
-		usable -= labelWidth + 1
+	if rightWidth > 0 {
+		usable -= rightWidth + 1
 	}
 	if usable <= 0 {
 		return 0
@@ -998,12 +1042,19 @@ func (m *Model) hourCount(nameWidth, labelWidth int) int {
 	return hours
 }
 
-func (m *Model) requiredHeight(memberCount, zoneCount int) int {
-	return baseFrameRows + zoneCount + memberCount
+func (m *Model) requiredHeight(memberCount, zoneCount int, showHoursHeader bool) int {
+	height := baseFrameRows + zoneCount + memberCount
+	if showHoursHeader {
+		height++
+	}
+	return height
 }
 
 func (m *Model) currentVisibleHourCount() int {
-	return m.hourCount(m.nameColumnWidth(), zoneLabelWidth(m.visibleConfigZones(m.visibleConfigMembers())))
+	visibleMembers := m.visibleConfigMembers()
+	labelWidth := max(zoneLabelWidth(m.visibleConfigZones(visibleMembers)), teamMemberZoneLabelWidth(visibleMembers, m.renderNow))
+	hoursWidth := m.hoursColumnWidth(visibleMembers)
+	return m.hourCount(m.nameColumnWidth(), rightColumnWidth(labelWidth, hoursWidth))
 }
 
 func (m *Model) renderMessage(message, footer string) string {
@@ -1124,20 +1175,104 @@ func visibleMemberZoneLabelWidth(members []visibleMember, now time.Time) int {
 	return width
 }
 
-func (m *Model) renderHourCells(start time.Time, hours int, location, referenceLocation *time.Location) string {
+func (m *Model) hoursColumnWidth(members []config.TeamMember) int {
+	if m.hiddenHours {
+		return 0
+	}
+	return memberScheduleHoursWidth(members)
+}
+
+func memberScheduleHoursWidth(members []config.TeamMember) int {
+	width := 0
+	for _, member := range members {
+		width = max(width, lipgloss.Width(memberScheduleHoursLabel(member)))
+	}
+	return width
+}
+
+func memberScheduleHoursLabel(member config.TeamMember) string {
+	slots, err := config.QuarterHourSlots(member.WorkingHours)
+	if err != nil {
+		return "?h"
+	}
+
+	quarters := 0
+	for _, enabled := range slots {
+		if enabled {
+			quarters++
+		}
+	}
+
+	return formatQuarterHours(quarters)
+}
+
+func formatQuarterHours(quarters int) string {
+	wholeHours := quarters / 4
+	switch quarters % 4 {
+	case 0:
+		return fmt.Sprintf("%dh", wholeHours)
+	case 1:
+		return fmt.Sprintf("%d.25h", wholeHours)
+	case 2:
+		return fmt.Sprintf("%d.5h", wholeHours)
+	default:
+		return fmt.Sprintf("%d.75h", wholeHours)
+	}
+}
+
+func rightColumnWidth(labelWidth, hoursWidth int) int {
+	width := 0
+	if labelWidth > 0 {
+		width += labelWidth
+	}
+	if hoursWidth > 0 {
+		if width > 0 {
+			width++
+		}
+		width += hoursWidth
+	}
+	return width
+}
+
+func (m *Model) renderRightColumns(left, right string) string {
+	if left == "" {
+		return right
+	}
+	if right == "" {
+		return left
+	}
+	return left + " " + right
+}
+
+func (m *Model) renderZoneHeaderCells(start time.Time, hours int, location *time.Location) string {
 	var builder strings.Builder
+	padding := m.zoneHeaderPadding(start, location)
 	for idx := 0; idx < hours; idx++ {
 		slotStart := start.Add(time.Duration(idx) * time.Hour)
 		hour := slotStart.In(location)
-		separator := m.cellSeparator(start, idx, hours, referenceLocation)
+		prefix := ""
+		if idx == 0 {
+			prefix = padding
+		}
+		separator := " "
+		if idx == hours-1 && padding != "" {
+			separator = ""
+		}
 		style := m.styles.info
 		if m.isCurrentHour(slotStart) {
 			style = m.styles.currentHeader
 		}
-		builder.WriteString(style.Render(fmt.Sprintf("%02d%s", hour.Hour(), separator)))
+		builder.WriteString(style.Render(fmt.Sprintf("%s%02d%s", prefix, hour.Hour(), separator)))
 	}
 
 	return builder.String()
+}
+
+func (m *Model) zoneHeaderPadding(start time.Time, location *time.Location) string {
+	if start.In(location).Minute() == 30 {
+		return " "
+	}
+	return ""
 }
 
 func (m *Model) cellSeparator(start time.Time, index, hours int, referenceLocation *time.Location) string {

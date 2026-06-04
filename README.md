@@ -1,6 +1,6 @@
 # ZoneAware
 
-ZoneAware is a mouse-capable terminal app for visualizing team working hours across time zones. It reads a human-editable YAML config, renders a rolling hourly timeline, and lets you hide team members or timezone labels directly in the TUI.
+ZoneAware is a mouse-capable terminal app for visualizing team working hours across time zones. It reads a human-editable YAML config, renders a rolling hourly timeline, shows each team member's total scheduled hours, and lets you hide team members or timezone labels directly in the TUI.
 
 ## Run
 
@@ -17,6 +17,8 @@ Use `./run.sh -config /path/to/zoneaware.yaml` to point at a different config fi
 - Click a timeline cell to toggle that local hour for the team member and save it back to config
 - Click a member name to edit it inline and save the new name
 - Click the right-side timezone on a member row to change that member's timezone
+- The far-right member column shows the total scheduled hours for that person
+- Click the `Hours` header to hide or show that summary column with `Show All`
 - Click a right-side timezone label in the header to hide that timezone row
 - Click `Show All` to reset hidden rows and timezones
 - Click `[ Add ]` at the bottom to create a new team member
